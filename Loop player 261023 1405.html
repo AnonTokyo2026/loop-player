@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>極簡無干擾影音播放器</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#fef2f2',
+                            100: '#ffe1e1',
+                            500: '#ef4444',
+                            600: '#dc2626',
+                            700: '#b91c1c',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome 圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Inter 字型 -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        /* 自訂滾動條 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 9999px;
+        }
+
+        /* --- 客製化時間軸樣式 --- */
+        .timeline-box {
+            height: 44px;
+            width: 100%;
+            border-radius: 8px;
+            overflow: visible;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            position: relative;
+            cursor: pointer;
+            touch-action: none;
+        }
+
+        /* 懸浮時間提示 Tooltip */
+        .timeline-hover-tooltip {
+            position: absolute;
+            bottom: calc(100% + 6px);
+            transform: translateX(-50%);
+            background-color: rgba(17, 24, 39, 0.9);
+            color: #ffffff;
+            font-size: 11px;
+            font-family: monospace;
+            padding: 2px 6px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            z-index: 50;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            will-change: left;
+        }
+
+        /* 上半部：可放置區段標籤區域 */
+        .top-half {
+            height: 22px;
+            width: 100%;
+            background-color: #4B5563; /* 深灰 */
+            position: relative;
+            overflow: hidden;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            isolation: isolate;
+        }
+
+        /* 下半部：較淺灰色 */
+        .bottom-half {
+            height: 22px;
+            width: 100%;
+            background-color: #9CA3AF; /* 淺灰 */
+            position: relative;
+            overflow: hidden;
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+            isolation: isolate;
+        }
+
+        .tags-layer {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* 下半部單一標籤樣式 (翡翠綠，視覺為 3px，帶有左右擴大的 Hit Area) */
+        .bottom-tag-region {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            width: 3px;
+            background-color: #10B981;
+            transform: translateX(-50%);
+            box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
+            box-sizing: border-box;
+            transition: background-color 0.15s ease;
+            pointer-events: auto;
+            cursor: ew-resize;
+            will-change: left;
+        }
+        .bottom-tag-region::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: -6px;
+            right: -6px;
+            background: transparent;
+            cursor: ew-resize;
+        }
+
+        /* 上半部已建立的區段標籤 */
+        .tag-region {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            background-color: rgba(59, 130, 246, 0.6);
+            border-left: 2px solid #60A5FA;
+            border-right: 2px solid #60A5FA;
+            box-sizing: border-box;
+            pointer-events: auto;
+            cursor: default;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            will-change: left, width;
+        }
+
+        /* 標籤調整 Handle */
+        .tag-handle {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 14px;
+            cursor: ew-resize;
+            z-index: 5;
+        }
+        .tag-handle-left { left: -7px; }
+        .tag-handle-right { right: -7px; }
+
+        /* 刪除按鈕 */
+        .tag-delete-btn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 16px;
+            height: 16px;
+            background-color: #EF4444;
+            color: #FFFFFF;
+            border-radius: 9999px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            cursor: pointer;
+            z-index: 10;
+            pointer-events: auto;
+        }
+        .tag-region:hover .tag-delete-btn { display: flex; }
+
+        /* 拖曳預覽 */
+        .tag-preview {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            background-color: rgba(245, 158, 11, 0.5);
+            border-left: 2px dashed #FBBF24;
+            border-right: 2px dashed #FBBF24;
+            pointer-events: none;
+            display: none;
+            z-index: 3;
+            will-change: left, width;
+        }
+
+        .bottom-tag-preview-line {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            width: 2px;
+            background-color: #FBBF24;
+            transform: translateX(-50%);
+            pointer-events: none;
+            display: none;
+            z-index: 3;
+            will-change: left;
+        }
+
+        /* 播放進度與游標 Playhead (視覺 3px 直線) */
+        .playhead-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 0%;
+            background-color: rgba(239, 68, 68, 0.25);
+            pointer-events: none;
+            z-index: 1;
+            will-change: width;
+        }
+
+        .playhead-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background-color: #EF4444;
+            transform: translateX(-50%);
+            z-index: 10;
+            pointer-events: auto;
+            cursor: ew-resize;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+            will-change: left;
+        }
+
+        /* 靠近觸發區定位 */
+        #history-hover-trigger {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+            width: 24px;
+            z-index: 30;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen transition-colors duration-300 flex flex-col p-[10px] box-border overflow-hidden">
+
+    <main class="w-full h-[calc(100vh-20px)] flex flex-col justify-between gap-[10px]">
+
+        <!-- 主播放區與右側收納式觀看紀錄容器 -->
+        <div class="relative w-full flex-1 overflow-hidden flex flex-col justify-center items-center m-0 p-0 min-h-0">
+            
+            <!-- 播放器本體：邊角與四周距離固定 10px -->
+            <section id="player-container" class="relative w-full h-full rounded-xl sm:rounded-2xl overflow-hidden bg-black shadow-2xl border border-gray-800 transition-all flex flex-col justify-center items-center mx-auto p-0">
+                <div id="placeholder-ui" class="flex flex-col items-center justify-center p-2 text-center space-y-1">
+                    <div class="w-20 h-20 rounded-full bg-gray-900 border border-gray-800 flex items-center justify-center text-gray-500">
+                        <i class="fa-solid fa-play text-3xl ml-1"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-300">準備好享受無干擾視聽體驗了嗎？</h2>
+                        <p class="text-sm text-gray-500 max-w-md mt-0.5">貼上 YouTube 連結或點擊「選擇本地檔案」開始播放。</p>
+                    </div>
+                </div>
+
+                <div id="iframe-wrapper" class="hidden w-full h-full">
+                    <div id="yt-player-target" class="w-full h-full"></div>
+                </div>
+
+                <div id="local-video-wrapper" class="hidden w-full h-full flex items-center justify-center bg-black">
+                    <video id="local-video" class="w-full h-full object-contain"></video>
+                </div>
+
+                <div id="local-audio-wrapper" class="hidden w-full h-full p-2 flex flex-col items-center justify-center space-y-2">
+                    <div class="w-28 h-28 rounded-3xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-brand-500 shadow-2xl animate-pulse">
+                        <i class="fa-solid fa-music text-4xl"></i>
+                    </div>
+                    <div class="text-center">
+                        <h3 id="audio-file-name" class="text-lg font-semibold text-gray-200">音樂播放中</h3>
+                        <p class="text-xs text-gray-400 mt-0.5">本地音訊檔案</p>
+                    </div>
+                    <audio id="local-audio" class="hidden"></audio>
+                </div>
+
+                <!-- 靠近觸發區（右側熱區，懸浮靠近時顯示紀錄） -->
+                <div id="history-hover-trigger" class="group" title="靠近或點擊展開觀看紀錄">
+                    <div class="w-6 h-12 bg-gray-800/80 hover:bg-brand-600 text-white rounded-l-lg flex items-center justify-center shadow-lg transition-all transform group-hover:scale-110">
+                        <i class="fa-solid fa-chevron-left text-xs"></i>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 右側收納式觀看紀錄欄 -->
+            <aside id="history-sidebar" class="absolute right-0 top-0 bottom-0 z-40 w-full sm:w-80 bg-gray-950/90 backdrop-blur-md p-4 shadow-2xl border-l border-gray-800 transition-all duration-300 transform translate-x-full opacity-0 flex flex-col h-full pointer-events-auto">
+
+                <div class="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-clock-rotate-left text-brand-500"></i>
+                        <h3 class="font-semibold text-sm text-gray-200">觀看紀錄</h3>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button id="clear-history-btn" class="text-xs text-gray-400 hover:text-red-500 transition" title="清除紀錄">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="history-list" class="flex-1 overflow-y-auto space-y-3 pr-1"></div>
+                <div id="empty-history" class="text-center py-12 text-gray-600 text-xs">
+                    尚無觀看紀錄
+                </div>
+            </aside>
+        </div>
+
+        <section class="bg-gray-900 rounded-xl sm:rounded-2xl p-2 sm:p-3 shadow-sm border border-gray-800 transition-all space-y-2 flex-shrink-0">
+            
+            <div class="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+                <div class="flex items-center space-x-3">
+                    <button id="btn-play-pause" class="w-10 h-10 rounded-xl bg-brand-600 hover:bg-brand-700 active:scale-95 text-white flex items-center justify-center transition shadow-md shadow-brand-600/30">
+                        <i id="icon-play-pause" class="fa-solid fa-play text-sm ml-0.5"></i>
+                    </button>
+                    <button id="btn-stop" class="w-10 h-10 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-200 flex items-center justify-center transition" title="停止">
+                        <i class="fa-solid fa-square"></i>
+                    </button>
+                    <button id="btn-loop" class="w-10 h-10 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-400 flex items-center justify-center transition" title="單曲循環 (Off)">
+                        <i class="fa-solid fa-repeat"></i>
+                    </button>
+                    
+                    <!-- 音量控制組件 -->
+                    <div class="flex items-center space-x-2 bg-gray-800/80 px-3 py-2 rounded-xl border border-gray-700/50">
+                        <button id="btn-mute" class="text-gray-300 hover:text-white transition w-5 flex justify-center" title="靜音切換">
+                            <i id="icon-volume" class="fa-solid fa-volume-high text-sm"></i>
+                        </button>
+                        <input type="range" id="volume-slider" min="0" max="100" value="100" class="w-20 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-500">
+                    </div>
+
+                    <!-- 播放速度控制組件 -->
+                    <div class="flex items-center space-x-2 bg-gray-800/80 px-3 py-2 rounded-xl border border-gray-700/50">
+                        <button id="btn-reset-speed" class="text-xs text-gray-400 hover:text-white transition focus:outline-none" title="重設速度 (1.00x)">
+                            <i class="fa-solid fa-gauge-high"></i>
+                        </button>
+                        <input type="range" id="speed-slider" min="0.25" max="2" step="0.05" value="1" class="w-16 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-500">
+                        <span id="speed-val" class="text-xs font-mono text-gray-300 w-10 text-right cursor-pointer" title="重設速度 (1.00x)">1.00x</span>
+                    </div>
+
+                    <div class="text-sm font-mono text-gray-300 ml-2">
+                        <span id="time-current">00:00</span> / <span id="time-duration">00:00</span>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-2 flex-grow max-w-xl">
+                    <form id="url-form" class="flex items-center space-x-2 w-full">
+                        <div class="relative flex-grow">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                                <i class="fa-solid fa-link text-xs"></i>
+                            </div>
+                            <input 
+                                type="text" 
+                                id="yt-url-input" 
+                                placeholder="貼上 YouTube 網址或影片 ID..." 
+                                class="w-full pl-8 pr-7 py-2 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none text-xs transition text-gray-100 placeholder-gray-500"
+                            >
+                            <button type="button" id="clear-input-btn" class="hidden absolute inset-y-0 right-0 pr-2.5 flex items-center text-gray-400 hover:text-gray-200">
+                                <i class="fa-solid fa-xmark text-xs"></i>
+                            </button>
+                        </div>
+                        <button 
+                            type="submit" 
+                            class="bg-brand-600 hover:bg-brand-700 active:scale-95 text-white font-medium px-3 py-2 rounded-lg transition shadow-md shadow-brand-600/20 flex items-center space-x-1 whitespace-nowrap text-xs"
+                            title="載入影片"
+                        >
+                            <i class="fa-solid fa-play text-xs"></i>
+                            <span>載入</span>
+                        </button>
+                        <label class="bg-gray-800 hover:bg-gray-700 active:scale-95 text-gray-200 font-medium px-3 py-2 rounded-lg transition cursor-pointer flex items-center space-x-1 whitespace-nowrap border border-gray-700 text-xs" title="選擇本地檔案">
+                            <i class="fa-solid fa-folder-open text-xs text-brand-500"></i>
+                            <span>本地</span>
+                            <input type="file" id="local-file-input" accept="video/mp4,audio/mp3,audio/mpeg,audio/*,video/*" class="hidden">
+                        </label>
+                    </form>
+
+                    <button id="clear-tags-btn" class="hover:text-red-500 underline transition cursor-pointer flex items-center space-x-1 text-xs text-gray-400 whitespace-nowrap ml-2">
+                        <i class="fa-solid fa-trash-can"></i>
+                        <span>清除標籤 (<span id="tag-count">0</span>)</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 兩層式客製化時間軸 -->
+            <div class="timeline-box" id="timeline-box">
+                <!-- 懸浮時間 Tooltip -->
+                <div class="timeline-hover-tooltip" id="timeline-tooltip">00:00</div>
+
+                <!-- 播放進度與游標層 -->
+                <div class="playhead-progress" id="playhead-progress"></div>
+                <div class="playhead-line" id="playhead-line" style="left: 0%;"></div>
+
+                <!-- 上半部 (區段標籤) -->
+                <div class="top-half" id="top-half">
+                    <div class="tags-layer" id="tags-layer"></div>
+                    <div class="tag-preview" id="tag-preview"></div>
+                </div>
+
+                <!-- 下半部 (單點標籤) -->
+                <div class="bottom-half" id="bottom-half">
+                    <div class="tags-layer" id="bottom-tags-layer"></div>
+                    <div class="bottom-tag-preview-line" id="bottom-tag-preview"></div>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- 載入 YouTube IFrame Player API -->
+    <script src="https://www.youtube.com/iframe_api"></script>
+
+    <script>
+        let ytPlayer = null;
+        let isYtApiReady = false;
+
+        function onYouTubeIframeAPIReady() {
+            isYtApiReady = true;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM 元素引用
+            const urlForm = document.getElementById('url-form');
+            const urlInput = document.getElementById('yt-url-input');
+            const clearInputBtn = document.getElementById('clear-input-btn');
+            const localFileInput = document.getElementById('local-file-input');
+
+            // 播放器容器
+            const playerContainer = document.getElementById('player-container');
+            const placeholderUi = document.getElementById('placeholder-ui');
+            const iframeWrapper = document.getElementById('iframe-wrapper');
+            const localVideoWrapper = document.getElementById('local-video-wrapper');
+            const localVideo = document.getElementById('local-video');
+            const localAudioWrapper = document.getElementById('local-audio-wrapper');
+            const localAudio = document.getElementById('local-audio');
+            const audioFileName = document.getElementById('audio-file-name');
+
+            // 收納式觀看紀錄側欄
+            const historySidebar = document.getElementById('history-sidebar');
+            const historyHoverTrigger = document.getElementById('history-hover-trigger');
+
+            // 控制按鈕與時間
+            const btnPlayPause = document.getElementById('btn-play-pause');
+            const iconPlayPause = document.getElementById('icon-play-pause');
+            const btnStop = document.getElementById('btn-stop');
+            const btnLoop = document.getElementById('btn-loop');
+            const timeCurrent = document.getElementById('time-current');
+            const timeDuration = document.getElementById('time-duration');
+
+            // 音量控制元素
+            const btnMute = document.getElementById('btn-mute');
+            const iconVolume = document.getElementById('icon-volume');
+            const volumeSlider = document.getElementById('volume-slider');
+
+            // 播放速度控制元素
+            const speedSlider = document.getElementById('speed-slider');
+            const speedVal = document.getElementById('speed-val');
+            const btnResetSpeed = document.getElementById('btn-reset-speed');
+            let currentSpeed = 1.0;
+
+            let currentVolume = 100;
+            let isMuted = false;
+
+            // 時間軸元素
+            const timelineBox = document.getElementById('timeline-box');
+            const timelineTooltip = document.getElementById('timeline-tooltip');
+            const topHalf = document.getElementById('top-half');
+            const tagsLayer = document.getElementById('tags-layer');
+            const tagPreview = document.getElementById('tag-preview');
+            const bottomHalf = document.getElementById('bottom-half');
+            const bottomTagsLayer = document.getElementById('bottom-tags-layer');
+            const bottomTagPreview = document.getElementById('bottom-tag-preview');
+            const playheadProgress = document.getElementById('playhead-progress');
+            const playheadLine = document.getElementById('playhead-line');
+            const clearTagsBtn = document.getElementById('clear-tags-btn');
+            const tagCountEl = document.getElementById('tag-count');
+
+            // UI / History
+            const historyList = document.getElementById('history-list');
+            const emptyHistory = document.getElementById('empty-history');
+            const clearHistoryBtn = document.getElementById('clear-history-btn');
+
+            // 側欄展開與靠近彈出機制
+            let isSidebarOpen = false;
+            let sidebarTimer = null;
+
+            function openSidebar() {
+                if (sidebarTimer) {
+                    clearTimeout(sidebarTimer);
+                    sidebarTimer = null;
+                }
+                historySidebar.classList.remove('translate-x-full', 'opacity-0');
+                historySidebar.classList.add('translate-x-0', 'opacity-100');
+                isSidebarOpen = true;
+            }
+
+            function closeSidebar() {
+                if (sidebarTimer) {
+                    clearTimeout(sidebarTimer);
+                    sidebarTimer = null;
+                }
+                historySidebar.classList.remove('translate-x-0', 'opacity-100');
+                historySidebar.classList.add('translate-x-full', 'opacity-0');
+                isSidebarOpen = false;
+            }
+
+            function scheduleSidebarClose() {
+                if (sidebarTimer) clearTimeout(sidebarTimer);
+                sidebarTimer = setTimeout(() => {
+                    closeSidebar();
+                }, 3000);
+            }
+
+            if (historyHoverTrigger) {
+                historyHoverTrigger.addEventListener('mouseenter', openSidebar);
+                historyHoverTrigger.addEventListener('click', () => {
+                    if (isSidebarOpen) closeSidebar();
+                    else openSidebar();
+                });
+            }
+
+            if (historySidebar) {
+                historySidebar.addEventListener('mouseenter', () => {
+                    if (sidebarTimer) {
+                        clearTimeout(sidebarTimer);
+                        sidebarTimer = null;
+                    }
+                });
+
+                historySidebar.addEventListener('mouseleave', scheduleSidebarClose);
+            }
+
+            // 音量控制
+            function setVolume(vol) {
+                currentVolume = vol;
+                if (currentVolume > 0) isMuted = false;
+
+                if (mediaType === 'yt' && ytPlayer && ytPlayer.setVolume) {
+                    ytPlayer.setVolume(currentVolume);
+                    if (isMuted) ytPlayer.mute(); else ytPlayer.unMute();
+                } else if (mediaType === 'video') {
+                    localVideo.volume = currentVolume / 100;
+                    localVideo.muted = isMuted;
+                } else if (mediaType === 'audio') {
+                    localAudio.volume = currentVolume / 100;
+                    localAudio.muted = isMuted;
+                }
+
+                updateVolumeUI();
+            }
+
+            function updateVolumeUI() {
+                volumeSlider.value = isMuted ? 0 : currentVolume;
+
+                if (isMuted || currentVolume == 0) {
+                    iconVolume.className = 'fa-solid fa-volume-xmark text-sm text-red-400';
+                } else if (currentVolume < 50) {
+                    iconVolume.className = 'fa-solid fa-volume-low text-sm text-gray-300';
+                } else {
+                    iconVolume.className = 'fa-solid fa-volume-high text-sm text-gray-300';
+                }
+            }
+
+            volumeSlider.addEventListener('input', (e) => {
+                const vol = parseInt(e.target.value, 10);
+                isMuted = (vol === 0);
+                setVolume(vol);
+            });
+
+            // 播放速度設定函數與事件處理
+            function setPlaybackSpeed(speed) {
+                currentSpeed = parseFloat(speed);
+                
+                if (mediaType === 'yt' && ytPlayer && ytPlayer.setPlaybackRate) {
+                    ytPlayer.setPlaybackRate(currentSpeed);
+                } else if (mediaType === 'video') {
+                    localVideo.playbackRate = currentSpeed;
+                } else if (mediaType === 'audio') {
+                    localAudio.playbackRate = currentSpeed;
+                }
+
+                speedSlider.value = currentSpeed;
+                speedVal.textContent = `${currentSpeed.toFixed(2)}x`;
+            }
+
+            speedSlider.addEventListener('input', (e) => {
+                setPlaybackSpeed(e.target.value);
+            });
+
+            // 點擊速度圖示按鈕或速度文字迅速重設為 1.00x 正常速度
+            if (btnResetSpeed) {
+                btnResetSpeed.addEventListener('click', () => {
+                    setPlaybackSpeed(1.0);
+                });
+            }
+
+            speedVal.addEventListener('click', () => {
+                setPlaybackSpeed(1.0);
+            });
+
+            // --- 滑鼠滾輪控制 (音量條、速度條、時間軸/播放頭) ---
+
+            // 1. 音量條滾輪控制
+            volumeSlider.addEventListener('wheel', (e) => {
+                e.preventDefault(); // 防止網頁滾動
+                const step = 5; // 每次滾動增減 5%
+                let newVol = currentVolume;
+                if (e.deltaY < 0) {
+                    newVol = Math.min(100, currentVolume + step);
+                } else {
+                    newVol = Math.max(0, currentVolume - step);
+                }
+                isMuted = (newVol === 0);
+                setVolume(newVol);
+            }, { passive: false });
+
+            // 2. 播放速度條滾輪控制
+            speedSlider.addEventListener('wheel', (e) => {
+                e.preventDefault(); // 防止網頁滾動
+                const step = 0.05; // 每次滾動增減 0.05x
+                let newSpeed = currentSpeed;
+                if (e.deltaY < 0) {
+                    newSpeed = Math.min(2.0, currentSpeed + step);
+                } else {
+                    newSpeed = Math.max(0.25, currentSpeed - step);
+                }
+                setPlaybackSpeed(Math.round(newSpeed * 100) / 100);
+            }, { passive: false });
+
+            // 3. 時間軸/播放頭滾輪控制 (微調播放時間)
+            timelineBox.addEventListener('wheel', (e) => {
+                e.preventDefault(); // 防止網頁滾動
+                const { current, duration } = getMediaTimes();
+                if (duration <= 0) return;
+
+                const step = 0.1; // 每次滾動跳躍 0.1 秒
+                let targetSec = current;
+                if (e.deltaY < 0) {
+                    targetSec = Math.min(duration, current + step);
+                } else {
+                    targetSec = Math.max(0, current - step);
+                }
+                seekToTime(targetSec);
+            }, { passive: false });
+
+            btnMute.addEventListener('click', () => {
+                isMuted = !isMuted;
+                if (mediaType === 'yt' && ytPlayer) {
+                    if (isMuted && ytPlayer.mute) ytPlayer.mute();
+                    else if (!isMuted && ytPlayer.unMute) ytPlayer.unMute();
+                }
+                if (mediaType === 'video') localVideo.muted = isMuted;
+                if (mediaType === 'audio') localAudio.muted = isMuted;
+
+                updateVolumeUI();
+            });
+
+            // 播放狀態管理
+            let mediaType = null;
+            let isPlaying = false;
+            let isLooping = false;
+            let progressTimer = null;
+
+            // 時間軸與標籤狀態
+            let isDraggingNewTop = false;
+            let isDraggingNewBottom = false;
+            let isResizingTag = false;
+            let isScrubbing = false;
+            let activeTagId = null;
+            let resizeHandle = null;
+            let startX = 0;
+            let currentX = 0;
+            let tags = []; 
+            let bottomTagPercent = null;
+
+            let watchHistory = JSON.parse(localStorage.getItem('yt_clean_history') || '[]');
+
+            // 記錄上一次滑鼠操作類型：'pause' (預設) 或 'stop'
+            let lastMouseAction = 'pause';
+
+            renderHistory();
+            startProgressLoop();
+
+            function hideAllPlayers() {
+                placeholderUi.classList.add('hidden');
+                iframeWrapper.classList.add('hidden');
+                localVideoWrapper.classList.add('hidden');
+                localAudioWrapper.classList.add('hidden');
+
+                if (ytPlayer && ytPlayer.stopVideo) ytPlayer.stopVideo();
+                localVideo.pause();
+                localVideo.src = '';
+                localAudio.pause();
+                localAudio.src = '';
+                
+                isPlaying = false;
+                updatePlayPauseIcon();
+            }
+
+            function formatTime(seconds) {
+                if (isNaN(seconds) || seconds < 0) return '00:00';
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            function getMediaTimes() {
+                let current = 0;
+                let duration = 0;
+
+                if (mediaType === 'yt' && ytPlayer && ytPlayer.getCurrentTime) {
+                    current = ytPlayer.getCurrentTime() || 0;
+                    duration = ytPlayer.getDuration() || 0;
+                } else if (mediaType === 'video') {
+                    current = localVideo.currentTime || 0;
+                    duration = localVideo.duration || 0;
+                } else if (mediaType === 'audio') {
+                    current = localAudio.currentTime || 0;
+                    duration = localAudio.duration || 0;
+                }
+
+                return { current, duration };
+            }
+
+            function seekToTime(seconds) {
+                if (mediaType === 'yt' && ytPlayer && ytPlayer.seekTo) {
+                    ytPlayer.seekTo(seconds, true);
+                } else if (mediaType === 'video') {
+                    localVideo.currentTime = seconds;
+                } else if (mediaType === 'audio') {
+                    localAudio.currentTime = seconds;
+                }
+                updatePlayhead();
+            }
+
+            function updatePlayhead() {
+                const { current, duration } = getMediaTimes();
+                timeCurrent.textContent = formatTime(current);
+                timeDuration.textContent = formatTime(duration);
+
+                if (duration > 0 && !isScrubbing) {
+                    const pct = Math.min(100, Math.max(0, (current / duration) * 100));
+                    playheadProgress.style.width = `${pct}%`;
+                    playheadLine.style.left = `${pct}%`;
+
+                    if (isLooping && tags.length > 0) {
+                        const tag = tags[0];
+                        const startSec = (tag.startPercent / 100) * duration;
+                        const endSec = (tag.endPercent / 100) * duration;
+
+                        if (current >= endSec) {
+                            seekToTime(startSec);
+                        }
+                    }
+                }
+            }
+
+            function startProgressLoop() {
+                if (progressTimer) clearInterval(progressTimer);
+                progressTimer = setInterval(() => {
+                    updatePlayhead();
+                }, 250); // 頻率調高為 250ms 使進度條更滑順
+            }
+
+            function updatePlayPauseIcon() {
+                if (isPlaying) {
+                    iconPlayPause.className = 'fa-solid fa-pause text-sm';
+                    btnPlayPause.title = '暫停';
+                } else {
+                    iconPlayPause.className = 'fa-solid fa-play text-sm ml-0.5';
+                    btnPlayPause.title = '播放';
+                }
+            }
+
+            function togglePlayPause() {
+                if (!mediaType) return;
+                if (isPlaying) pauseMedia();
+                else playMedia();
+            }
+
+            btnPlayPause.addEventListener('click', () => {
+                lastMouseAction = 'pause';
+                togglePlayPause();
+            });
+
+            function playMedia() {
+                if (!mediaType) return;
+                if (mediaType === 'yt' && ytPlayer && ytPlayer.playVideo) {
+                    ytPlayer.playVideo();
+                } else if (mediaType === 'video') {
+                    localVideo.play();
+                } else if (mediaType === 'audio') {
+                    localAudio.play();
+                }
+                isPlaying = true;
+                updatePlayPauseIcon();
+            }
+
+            function pauseMedia() {
+                if (!mediaType) return;
+                if (mediaType === 'yt' && ytPlayer && ytPlayer.pauseVideo) {
+                    ytPlayer.pauseVideo();
+                } else if (mediaType === 'video') {
+                    localVideo.pause();
+                } else if (mediaType === 'audio') {
+                    localAudio.pause();
+                }
+                isPlaying = false;
+                updatePlayPauseIcon();
+            }
+
+            function stopMedia() {
+                if (!mediaType) return;
+
+                const { duration } = getMediaTimes();
+                let targetTimeSec = 0;
+
+                if (isLooping && tags.length > 0 && duration > 0) {
+                    targetTimeSec = (tags[0].startPercent / 100) * duration;
+                } else if (!isLooping && bottomTagPercent !== null && duration > 0) {
+                    targetTimeSec = (bottomTagPercent / 100) * duration;
+                }
+
+                pauseMedia();
+                seekToTime(targetTimeSec);
+            }
+
+            btnStop.addEventListener('click', () => {
+                lastMouseAction = 'stop';
+                // 如果目前未處於播放狀態，按下停止鍵視同按下播放鍵
+                if (!isPlaying) {
+                    playMedia();
+                } else {
+                    stopMedia();
+                }
+            });
+
+            btnLoop.addEventListener('click', () => {
+                isLooping = !isLooping;
+                if (isLooping) {
+                    btnLoop.className = 'w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center transition shadow-md shadow-brand-600/20';
+                    btnLoop.title = '循環模式已開啟 (Loop ON)';
+                } else {
+                    btnLoop.className = 'w-10 h-10 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-400 flex items-center justify-center transition';
+                    btnLoop.title = '循環模式已關閉 (Loop OFF)';
+                }
+
+                if (tags.length === 0) {
+                    localVideo.loop = isLooping;
+                    localAudio.loop = isLooping;
+                } else {
+                    localVideo.loop = false;
+                    localAudio.loop = false;
+                }
+            });
+
+            function handleMediaEnded() {
+                if (isLooping && tags.length === 0) {
+                    seekToTime(0);
+                    playMedia();
+                } else {
+                    isPlaying = false;
+                    updatePlayPauseIcon();
+                }
+            }
+            localVideo.addEventListener('ended', handleMediaEnded);
+            localAudio.addEventListener('ended', handleMediaEnded);
+
+            function playYouTubeVideo(videoId) {
+                hideAllPlayers();
+                mediaType = 'yt';
+                iframeWrapper.classList.remove('hidden');
+
+                if (ytPlayer && ytPlayer.destroy) {
+                    ytPlayer.destroy();
+                }
+
+                ytPlayer = new YT.Player('yt-player-target', {
+                    videoId: videoId,
+                    width: '100%',
+                    height: '100%',
+                    playerVars: {
+                        'autoplay': 1,
+                        'rel': 0,
+                        'modestbranding': 1,
+                        'iv_load_policy': 3
+                    },
+                    events: {
+                        'onReady': (event) => {
+                            event.target.setVolume(currentVolume);
+                            if (isMuted) event.target.mute(); else event.target.unMute();
+                            event.target.setPlaybackRate(currentSpeed);
+                            event.target.playVideo();
+                            isPlaying = true;
+                            updatePlayPauseIcon();
+                        },
+                        'onStateChange': (event) => {
+                            if (event.data === YT.PlayerState.PLAYING) {
+                                isPlaying = true;
+                            } else if (event.data === YT.PlayerState.PAUSED) {
+                                isPlaying = false;
+                            } else if (event.data === YT.PlayerState.ENDED) {
+                                if (isLooping) {
+                                    ytPlayer.seekTo(0);
+                                    ytPlayer.playVideo();
+                                } else {
+                                    isPlaying = false;
+                                }
+                            }
+                            updatePlayPauseIcon();
+                        }
+                    }
+                });
+
+                saveToHistory(videoId);
+            }
+
+            localFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                hideAllPlayers();
+                const fileURL = URL.createObjectURL(file);
+
+                if (file.type.startsWith('audio/') || file.name.endsWith('.mp3') || file.name.endsWith('.wav')) {
+                    mediaType = 'audio';
+                    audioFileName.textContent = file.name;
+                    localAudio.src = fileURL;
+                    localAudio.loop = isLooping;
+                    localAudio.volume = currentVolume / 100;
+                    localAudio.muted = isMuted;
+                    localAudio.playbackRate = currentSpeed;
+                    localAudioWrapper.classList.remove('hidden');
+                    localAudio.play();
+                } else {
+                    mediaType = 'video';
+                    localVideo.src = fileURL;
+                    localVideo.loop = isLooping;
+                    localVideo.volume = currentVolume / 100;
+                    localVideo.muted = isMuted;
+                    localVideo.playbackRate = currentSpeed;
+                    localVideoWrapper.classList.remove('hidden');
+                    localVideo.play();
+                }
+                isPlaying = true;
+                updatePlayPauseIcon();
+            });
+
+            function getRelativeX(e, container) {
+                const rect = container.getBoundingClientRect();
+                let x = e.clientX - rect.left;
+                return Math.max(0, Math.min(x, rect.width));
+            }
+
+            function updatePlayheadUI(percent) {
+                playheadProgress.style.width = `${percent}%`;
+                playheadLine.style.left = `${percent}%`;
+                
+                const { duration } = getMediaTimes();
+                if (duration > 0) {
+                    const currentSec = (percent / 100) * duration;
+                    timeCurrent.textContent = formatTime(currentSec);
+                }
+            }
+
+            function isNearPlayhead(clickX, rectWidth) {
+                const playheadPercent = parseFloat(playheadLine.style.left) || 0;
+                const playheadPx = (playheadPercent / 100) * rectWidth;
+                return Math.abs(clickX - playheadPx) <= 10;
+            }
+
+            let animationFrameId = null;
+            let lastMouseEvent = null;
+
+            timelineBox.addEventListener('mousemove', (e) => {
+                const rect = timelineBox.getBoundingClientRect();
+                if (rect.width === 0) return;
+
+                const hoverX = getRelativeX(e, timelineBox);
+                const hoverPct = hoverX / rect.width;
+                const { duration } = getMediaTimes();
+                const hoverSec = duration > 0 ? hoverPct * duration : 0;
+
+                timelineTooltip.textContent = formatTime(hoverSec);
+                timelineTooltip.style.left = `${hoverX}px`;
+                timelineTooltip.style.display = 'block';
+            });
+
+            timelineBox.addEventListener('mouseleave', () => {
+                timelineTooltip.style.display = 'none';
+            });
+
+            timelineBox.addEventListener('mousedown', (e) => {
+                const rectWidth = timelineBox.getBoundingClientRect().width;
+                if (rectWidth === 0) return;
+
+                const clickX = getRelativeX(e, timelineBox);
+                const clickPct = (clickX / rectWidth) * 100;
+                const { duration } = getMediaTimes();
+
+                // 點擊 Playhead
+                if (isNearPlayhead(clickX, rectWidth) || e.target === playheadLine) {
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    isScrubbing = true;
+                    updatePlayheadUI(clickPct);
+                    if (duration > 0) seekToTime((clickPct / 100) * duration);
+                    return;
+                }
+
+                if (e.target.classList.contains('tag-handle') || e.target.closest('.tag-delete-btn')) return;
+
+                if (e.target.closest('#top-half')) {
+                    if (tags.length >= 1) return;
+                    isDraggingNewTop = true;
+                    startX = getRelativeX(e, topHalf);
+                    currentX = startX;
+                    updatePreview(tagPreview, startX, currentX);
+                    tagPreview.style.display = 'block';
+                } 
+                else if (e.target.closest('#bottom-half')) {
+                    isDraggingNewBottom = true;
+                    currentX = getRelativeX(e, bottomHalf);
+                    bottomTagPreview.style.left = `${currentX}px`;
+                    bottomTagPreview.style.display = 'block';
+
+                    updatePlayheadUI(clickPct);
+                    if (duration > 0) seekToTime((clickPct / 100) * duration);
+                }
+            });
+
+            // 採用 requestAnimationFrame (rAF) 進行拖曳節流優化，避免高頻耗能
+            window.addEventListener('mousemove', (e) => {
+                if (!isScrubbing && !isDraggingNewTop && !isDraggingNewBottom && !isResizingTag) return;
+                lastMouseEvent = e;
+
+                if (!animationFrameId) {
+                    animationFrameId = requestAnimationFrame(processMouseMove);
+                }
+            });
+
+            function processMouseMove() {
+                animationFrameId = null;
+                if (!lastMouseEvent) return;
+                const e = lastMouseEvent;
+
+                const rectWidth = timelineBox.getBoundingClientRect().width;
+                if (rectWidth === 0) return;
+
+                if (isScrubbing) {
+                    const currentPx = getRelativeX(e, timelineBox);
+                    const pct = Math.min(100, Math.max(0, (currentPx / rectWidth) * 100));
+                    
+                    updatePlayheadUI(pct);
+                    const { duration } = getMediaTimes();
+                    if (duration > 0) {
+                        seekToTime((pct / 100) * duration);
+                    }
+                } else if (isDraggingNewTop) {
+                    currentX = getRelativeX(e, topHalf);
+                    updatePreview(tagPreview, startX, currentX);
+                } else if (isDraggingNewBottom) {
+                    currentX = getRelativeX(e, bottomHalf);
+                    bottomTagPreview.style.left = `${currentX}px`;
+                } else if (isResizingTag && activeTagId !== null) {
+                    const currentPx = getRelativeX(e, topHalf);
+                    const currentPercent = (currentPx / rectWidth) * 100;
+
+                    const tag = tags.find(t => t.id === activeTagId);
+                    if (tag) {
+                        if (resizeHandle === 'left') {
+                            tag.startPercent = Math.min(currentPercent, tag.endPercent - 0.5);
+                        } else if (resizeHandle === 'right') {
+                            tag.endPercent = Math.max(currentPercent, tag.startPercent + 0.5);
+                        }
+                        renderTags();
+                    }
+                }
+            }
+
+            window.addEventListener('mouseup', () => {
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                    animationFrameId = null;
+                }
+
+                const rectWidth = timelineBox.getBoundingClientRect().width;
+
+                if (isScrubbing) {
+                    isScrubbing = false;
+                }
+
+                if (isDraggingNewTop) {
+                    isDraggingNewTop = false;
+                    tagPreview.style.display = 'none';
+
+                    const leftPx = Math.min(startX, currentX);
+                    const rightPx = Math.max(startX, currentX);
+                    if (rightPx - leftPx > 5) {
+                        const startPercent = (leftPx / rectWidth) * 100;
+                        const endPercent = (rightPx / rectWidth) * 100;
+                        createTopTag(startPercent, endPercent);
+                    }
+                }
+
+                if (isDraggingNewBottom) {
+                    isDraggingNewBottom = false;
+                    bottomTagPreview.style.display = 'none';
+
+                    bottomTagPercent = (currentX / rectWidth) * 100;
+                    renderBottomTag();
+                }
+
+                if (isResizingTag) {
+                    isResizingTag = false;
+                    activeTagId = null;
+                    resizeHandle = null;
+                }
+
+                updateTotalTagCount();
+            });
+
+            function updatePreview(previewEl, sX, cX) {
+                const left = Math.min(sX, cX);
+                const width = Math.abs(cX - sX);
+                previewEl.style.left = `${left}px`;
+                previewEl.style.width = `${width}px`;
+            }
+
+            function createTopTag(startPercent, endPercent) {
+                const tagId = Date.now();
+                tags = [{ id: tagId, startPercent, endPercent }];
+                renderTags();
+            }
+
+            function renderTags() {
+                tagsLayer.innerHTML = '';
+
+                tags.forEach(tag => {
+                    const tagEl = document.createElement('div');
+                    tagEl.className = 'tag-region';
+                    tagEl.style.left = `${tag.startPercent}%`;
+                    tagEl.style.width = `${tag.endPercent - tag.startPercent}%`;
+
+                    const leftHandle = document.createElement('div');
+                    leftHandle.className = 'tag-handle tag-handle-left';
+                    leftHandle.addEventListener('mousedown', (e) => {
+                        e.stopPropagation();
+                        isResizingTag = true;
+                        activeTagId = tag.id;
+                        resizeHandle = 'left';
+                    });
+
+                    const rightHandle = document.createElement('div');
+                    rightHandle.className = 'tag-handle tag-handle-right';
+                    rightHandle.addEventListener('mousedown', (e) => {
+                        e.stopPropagation();
+                        isResizingTag = true;
+                        activeTagId = tag.id;
+                        resizeHandle = 'right';
+                    });
+
+                    const deleteBtn = document.createElement('div');
+                    deleteBtn.className = 'tag-delete-btn';
+                    deleteBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+                    deleteBtn.title = '刪除此標籤';
+                    deleteBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        tags = tags.filter(t => t.id !== tag.id);
+                        renderTags();
+                        updateTotalTagCount();
+                    });
+
+                    tagEl.appendChild(leftHandle);
+                    tagEl.appendChild(rightHandle);
+                    tagEl.appendChild(deleteBtn);
+                    tagsLayer.appendChild(tagEl);
+                });
+
+                updateTotalTagCount();
+            }
+
+            function renderBottomTag() {
+                bottomTagsLayer.innerHTML = '';
+
+                if (bottomTagPercent !== null) {
+                    const tagEl = document.createElement('div');
+                    tagEl.className = 'bottom-tag-region';
+                    tagEl.style.left = `${bottomTagPercent}%`;
+
+                    tagEl.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const { duration } = getMediaTimes();
+                        if (duration > 0) {
+                            seekToTime((bottomTagPercent / 100) * duration);
+                        }
+                    });
+
+                    bottomTagsLayer.appendChild(tagEl);
+                }
+
+                updateTotalTagCount();
+            }
+
+            function updateTotalTagCount() {
+                const count = tags.length + (bottomTagPercent !== null ? 1 : 0);
+                tagCountEl.textContent = count;
+            }
+
+            clearTagsBtn.addEventListener('click', () => {
+                tags = [];
+                bottomTagPercent = null;
+                renderTags();
+                renderBottomTag();
+            });
+
+            function extractVideoId(url) {
+                if (!url) return null;
+                url = url.trim();
+                if (/^[a-zA-Z0-9_-]{11}$/.test(url)) return url;
+
+                const patterns = [
+                    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/,
+                    /youtube\.com\/shorts\/([^"&?\/\s]{11})/,
+                    /youtube\.com\/live\/([^"&?\/\s]{11})/
+                ];
+
+                for (let pattern of patterns) {
+                    const match = url.match(pattern);
+                    if (match && match[1]) return match[1];
+                }
+                return null;
+            }
+
+            urlForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const videoId = extractVideoId(urlInput.value);
+                if (videoId) {
+                    playYouTubeVideo(videoId);
+                }
+            });
+
+            urlInput.addEventListener('input', () => {
+                if (urlInput.value.length > 0) {
+                    clearInputBtn.classList.remove('hidden');
+                } else {
+                    clearInputBtn.classList.add('hidden');
+                }
+            });
+
+            clearInputBtn.addEventListener('click', () => {
+                urlInput.value = '';
+                clearInputBtn.classList.add('hidden');
+                urlInput.focus();
+            });
+
+            function saveToHistory(videoId) {
+                watchHistory = watchHistory.filter(item => item.id !== videoId);
+                watchHistory.unshift({ id: videoId, timestamp: new Date().getTime() });
+                if (watchHistory.length > 12) watchHistory = watchHistory.slice(0, 12);
+                localStorage.setItem('yt_clean_history', JSON.stringify(watchHistory));
+                renderHistory();
+            }
+
+            function renderHistory() {
+                historyList.innerHTML = '';
+                if (watchHistory.length === 0) {
+                    emptyHistory.classList.remove('hidden');
+                    return;
+                }
+                emptyHistory.classList.add('hidden');
+
+                watchHistory.forEach(item => {
+                    const card = document.createElement('div');
+                    card.className = 'group relative bg-gray-800/60 border border-gray-700/60 rounded-xl overflow-hidden hover:shadow-md transition-all flex items-center justify-between cursor-pointer p-2 space-x-3';
+                    const thumbnailUrl = `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`;
+
+                    card.innerHTML = `
+                        <div class="relative w-20 aspect-video bg-gray-900 rounded-lg overflow-hidden flex-shrink-0">
+                            <img src="${thumbnailUrl}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" onerror="this.src='https://placehold.co/400x225/1f2937/ffffff?text=Video'">
+                            <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <i class="fa-solid fa-play text-white text-xs"></i>
+                            </div>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="font-mono text-xs text-gray-200 truncate">ID: ${item.id}</p>
+                        </div>
+                        <button class="delete-item-btn text-gray-400 hover:text-red-500 p-1 flex-shrink-0" title="刪除此紀錄">
+                            <i class="fa-solid fa-xmark text-xs"></i>
+                        </button>
+                    `;
+
+                    card.addEventListener('click', (e) => {
+                        if (!e.target.closest('.delete-item-btn')) {
+                            urlInput.value = item.id;
+                            clearInputBtn.classList.remove('hidden');
+                            playYouTubeVideo(item.id);
+                        }
+                    });
+
+                    const deleteBtn = card.querySelector('.delete-item-btn');
+                    deleteBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        watchHistory = watchHistory.filter(h => h.id !== item.id);
+                        localStorage.setItem('yt_clean_history', JSON.stringify(watchHistory));
+                        renderHistory();
+                    });
+
+                    historyList.appendChild(card);
+                });
+            }
+
+            clearHistoryBtn.addEventListener('click', () => {
+                if (watchHistory.length === 0) return;
+                watchHistory = [];
+                localStorage.removeItem('yt_clean_history');
+                renderHistory();
+            });
+
+            // 鍵盤 P 鍵控制：依據最後一次滑鼠操作決策
+            window.addEventListener('keydown', (e) => {
+                // 如果使用者正在輸入網址，不觸發快捷鍵
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+                if (e.key === 'p' || e.key === 'P') {
+                    e.preventDefault();
+
+                    if (!isPlaying) {
+                        // 當前為停止/暫停狀態時按下 P -> 一律開始播放
+                        playMedia();
+                    } else {
+                        // 當前為播放狀態時按下 P -> 依據上一次滑鼠操作決定暫停還是停止
+                        if (lastMouseAction === 'stop') {
+                            stopMedia();
+                        } else {
+                            pauseMedia();
+                        }
+                    }
+                }
+            });
+
+            // 保持空函數以維持原有程式碼呼叫相容性，但不再有任何彈出畫面
+            function showToast(message, type = 'info') {}
+        });
+    </script>
+</body>
+</html>
