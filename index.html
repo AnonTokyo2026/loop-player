@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極簡無干擾影音播放器</title>
+    <title>極簡無干擾影音播放器 - 支援左右聲道平衡控制</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -282,7 +282,7 @@
                 </div>
 
                 <div id="local-video-wrapper" class="hidden w-full h-full flex items-center justify-center bg-black">
-                    <video id="local-video" class="w-full h-full object-contain"></video>
+                    <video id="local-video" class="w-full h-full object-contain" crossorigin="anonymous"></video>
                 </div>
 
                 <div id="local-audio-wrapper" class="hidden w-full h-full p-2 flex flex-col items-center justify-center space-y-2">
@@ -293,7 +293,7 @@
                         <h3 id="audio-file-name" class="text-lg font-semibold text-gray-200">音樂播放中</h3>
                         <p class="text-xs text-gray-400 mt-0.5">本地音訊檔案</p>
                     </div>
-                    <audio id="local-audio" class="hidden"></audio>
+                    <audio id="local-audio" class="hidden" crossorigin="anonymous"></audio>
                 </div>
 
                 <!-- 靠近觸發區（右側熱區，懸浮靠近時顯示紀錄） -->
@@ -329,7 +329,7 @@
         <section class="bg-gray-900 rounded-xl sm:rounded-2xl p-2 sm:p-3 shadow-sm border border-gray-800 transition-all space-y-2 flex-shrink-0">
             
             <div class="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
-                <div class="flex items-center space-x-3">
+                <div class="flex items-center space-x-3 flex-wrap gap-y-2">
                     <button id="btn-play-pause" class="w-10 h-10 rounded-xl bg-brand-600 hover:bg-brand-700 active:scale-95 text-white flex items-center justify-center transition shadow-md shadow-brand-600/30">
                         <i id="icon-play-pause" class="fa-solid fa-play text-sm ml-0.5"></i>
                     </button>
@@ -346,6 +346,20 @@
                             <i id="icon-volume" class="fa-solid fa-volume-high text-sm"></i>
                         </button>
                         <input type="range" id="volume-slider" min="0" max="100" value="100" class="w-20 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-500">
+                    </div>
+
+                    <!-- 左右聲道平衡控制組件 (Pan Control) -->
+                    <div class="flex items-center space-x-2 bg-gray-800/80 px-3 py-2 rounded-xl border border-gray-700/50 relative group" title="左右聲道平衡 (滾輪或點擊重設)">
+                        <button id="btn-reset-pan" class="text-xs text-gray-400 hover:text-white transition focus:outline-none" title="重設聲道平衡 (Center)">
+                            <i class="fa-solid fa-sliders"></i>
+                        </button>
+                        <input type="range" id="pan-slider" min="-1" max="1" step="0.05" value="0" class="w-16 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-500">
+                        <span id="pan-val" class="text-xs font-mono text-gray-300 w-12 text-center cursor-pointer select-none" title="重設聲道平衡 (Center)">Center</span>
+                        
+                        <!-- YouTube CORS 免責提示 Tooltip -->
+                        <div id="pan-yt-tooltip" class="hidden absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-gray-900 border border-gray-700 text-gray-300 text-[10px] p-2 rounded shadow-xl pointer-events-none z-50 text-center">
+                            註：YouTube 影片受跨網域 CORS 限制，聲道平衡僅支援本地檔案。
+                        </div>
                     </div>
 
                     <!-- 播放速度控制組件 -->
@@ -470,6 +484,144 @@
             const btnMute = document.getElementById('btn-mute');
             const iconVolume = document.getElementById('icon-volume');
             const volumeSlider = document.getElementById('volume-slider');
+
+            // 左右聲道平衡控制元素 (Web Audio API)
+            const panSlider = document.getElementById('pan-slider');
+            const panVal = document.getElementById('pan-val');
+            const btnResetPan = document.getElementById('btn-reset-pan');
+            const panYtTooltip = document.getElementById('pan-yt-tooltip');
+            let currentPan = 0; // -1 (Left) to 1 (Right)
+
+            // Web Audio API 節點架構
+            let audioCtx = null;
+            let pannerNode = null;
+            let videoSourceNode = null;
+            let audioSourceNode = null;
+
+            // 初始化 Web Audio API Context 與 Panner 節點
+            function initAudioContext() {
+                if (audioCtx) {
+                    if (audioCtx.state === 'suspended') {
+                        audioCtx.resume();
+                    }
+                    return;
+                }
+
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) return;
+
+                audioCtx = new AudioContextClass();
+
+                // 優先使用 StereoPannerNode，若不支援則降級使用 PannerNode
+                if (audioCtx.createStereoPanner) {
+                    pannerNode = audioCtx.createStereoPanner();
+                    pannerNode.pan.value = currentPan;
+                } else if (audioCtx.createPanner) {
+                    pannerNode = audioCtx.createPanner();
+                    pannerNode.panningModel = 'equalpower';
+                    pannerNode.setPosition(currentPan, 0, 1 - Math.abs(currentPan));
+                }
+
+                // 建立本地 Video 音訊來源節點
+                if (localVideo) {
+                    try {
+                        videoSourceNode = audioCtx.createMediaElementSource(localVideo);
+                        if (pannerNode) {
+                            videoSourceNode.connect(pannerNode);
+                            pannerNode.connect(audioCtx.destination);
+                        } else {
+                            videoSourceNode.connect(audioCtx.destination);
+                        }
+                    } catch (e) {
+                        console.warn("Video MediaElementSource error:", e);
+                    }
+                }
+
+                // 建立本地 Audio 音訊來源節點
+                if (localAudio) {
+                    try {
+                        audioSourceNode = audioCtx.createMediaElementSource(localAudio);
+                        if (pannerNode) {
+                            audioSourceNode.connect(pannerNode);
+                            pannerNode.connect(audioCtx.destination);
+                        } else {
+                            audioSourceNode.connect(audioCtx.destination);
+                        }
+                    } catch (e) {
+                        console.warn("Audio MediaElementSource error:", e);
+                    }
+                }
+            }
+
+            // 更新聲道平衡 (Pan Value)
+            function setPan(panValue) {
+                currentPan = parseFloat(panValue);
+                if (isNaN(currentPan)) currentPan = 0;
+
+                // 喚醒與設置 Web Audio Node
+                if (audioCtx && audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                if (pannerNode) {
+                    if (pannerNode.pan) {
+                        pannerNode.pan.setValueAtTime(currentPan, audioCtx ? audioCtx.currentTime : 0);
+                    } else if (pannerNode.setPosition) {
+                        // 舊式 3D PannerNode 模擬
+                        pannerNode.setPosition(currentPan, 0, 1 - Math.abs(currentPan));
+                    }
+                }
+
+                // UI 更新
+                panSlider.value = currentPan;
+                if (Math.abs(currentPan) < 0.01) {
+                    panVal.textContent = 'Center';
+                } else if (currentPan < 0) {
+                    panVal.textContent = `L ${Math.abs(currentPan).toFixed(2)}`;
+                } else {
+                    panVal.textContent = `R ${currentPan.toFixed(2)}`;
+                }
+
+                // 若為 YouTube 媒體類型則顯示免責提示
+                if (mediaType === 'yt') {
+                    panYtTooltip.classList.remove('hidden');
+                    setTimeout(() => panYtTooltip.classList.add('hidden'), 3000);
+                } else {
+                    panYtTooltip.classList.add('hidden');
+                }
+            }
+
+            panSlider.addEventListener('input', (e) => {
+                initAudioContext();
+                setPan(e.target.value);
+            });
+
+            // 重設聲道平衡為中央 (0.00 / Center)
+            if (btnResetPan) {
+                btnResetPan.addEventListener('click', () => {
+                    initAudioContext();
+                    setPan(0);
+                });
+            }
+
+            panVal.addEventListener('click', () => {
+                initAudioContext();
+                setPan(0);
+            });
+
+            // 滾輪控制聲道平衡
+            panSlider.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                initAudioContext();
+                const step = 0.05;
+                let newPan = currentPan;
+                if (e.deltaY < 0) {
+                    newPan = Math.min(1.0, currentPan + step);
+                } else {
+                    newPan = Math.max(-1.0, currentPan - step);
+                }
+                setPan(Math.round(newPan * 100) / 100);
+            }, { passive: false });
 
             // 播放速度控制元素
             const speedSlider = document.getElementById('speed-slider');
@@ -804,6 +956,9 @@
 
             function playMedia() {
                 if (!mediaType) return;
+                
+                initAudioContext(); // 啟動 Audio Context
+
                 if (mediaType === 'yt' && ytPlayer && ytPlayer.playVideo) {
                     ytPlayer.playVideo();
                 } else if (mediaType === 'video') {
@@ -939,6 +1094,7 @@
                 if (!file) return;
 
                 hideAllPlayers();
+                initAudioContext();
                 const fileURL = URL.createObjectURL(file);
 
                 if (file.type.startsWith('audio/') || file.name.endsWith('.mp3') || file.name.endsWith('.wav')) {
@@ -1358,7 +1514,6 @@
                 }
             });
 
-            // 保持空函數以維持原有程式碼呼叫相容性，但不再有任何彈出畫面
             function showToast(message, type = 'info') {}
         });
     </script>
