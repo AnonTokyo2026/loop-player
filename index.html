@@ -452,6 +452,27 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
+            // 自動移除 Focus 輔助函式（防止鍵盤事件被控制元件捕獲）
+            function blurActiveElement() {
+                if (document.activeElement && typeof document.activeElement.blur === 'function') {
+                    // 若當前 Focus 不是輸入文字框，就將 Focus 移開
+                    if (document.activeElement.tagName !== 'INPUT' || document.activeElement.type !== 'text') {
+                        document.activeElement.blur();
+                    }
+                }
+            }
+
+            // 全域滑鼠釋放時自動消除焦點
+            window.addEventListener('mouseup', () => {
+                setTimeout(blurActiveElement, 50);
+            });
+
+            // 為所有按鈕與範圍選擇器加上點擊或變更後移開焦點的機制
+            document.querySelectorAll('button, input[type="range"]').forEach(el => {
+                el.addEventListener('click', () => blurActiveElement());
+                el.addEventListener('change', () => blurActiveElement());
+            });
+
             // DOM 元素引用
             const urlForm = document.getElementById('url-form');
             const urlInput = document.getElementById('yt-url-input');
@@ -1494,11 +1515,14 @@
 
             // 鍵盤 P 鍵控制：依據最後一次滑鼠操作決策
             window.addEventListener('keydown', (e) => {
-                // 如果使用者正在輸入網址，不觸發快捷鍵
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                // 如果使用者正在網址列輸入，不觸發快捷鍵
+                if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
 
                 if (e.key === 'p' || e.key === 'P') {
                     e.preventDefault();
+
+                    // 強制釋放任何 UI 元件上的 Focus，避免記憶效應
+                    blurActiveElement();
 
                     if (!isPlaying) {
                         // 當前為停止/暫停狀態時按下 P -> 一律開始播放
@@ -1510,6 +1534,20 @@
                         } else {
                             pauseMedia();
                         }
+                    }
+                } else if (e.key === '-' || e.key === '_') {
+                    // 按下 - 鍵：倒退 1 秒
+                    e.preventDefault();
+                    blurActiveElement();
+                    const { current } = getMediaTimes();
+                    seekToTime(Math.max(0, current - 1));
+                } else if (e.key === '=' || e.key === '+') {
+                    // 按下 = 鍵：前進 1 秒
+                    e.preventDefault();
+                    blurActiveElement();
+                    const { current, duration } = getMediaTimes();
+                    if (duration > 0) {
+                        seekToTime(Math.min(duration, current + 1));
                     }
                 }
             });
